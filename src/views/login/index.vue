@@ -2,14 +2,12 @@
  * @Author: ChenYu ycyplus@gmail.com
  * @Date: 2025-04-29 23:07:28
  * @LastEditors: ChenYu ycyplus@gmail.com
- * @LastEditTime: 2026-03-05
+ * @LastEditTime: 2026-04-29
  * @FilePath: \Robot_Admin\src\views\login\index.vue
- * @Description: 登录页
- *
- * 业务逻辑全部委托给 useLoginController composable，
- * 本页面仅负责：拼装 UI + 传入配置。
- *
- * Copyright (c) 2025 by CHENY, All Rights Reserved 😎.
+ * @Description: 登录页 — 基于 C_Login 组件 + 租户编码/验证码扩展
+ *               保留原始 C_Login 风格，移除人机校验
+ *               支持独立运行和微前端嵌入双模式
+ * Copyright (c) 2026 by CHENY, All Rights Reserved 😎.
 -->
 <template>
   <div class="login-container bg-[#181818]">
@@ -43,15 +41,9 @@
               themeStore.isDark ? 'mdi:weather-sunny' : 'mdi:weather-night'
             "
             :size="16"
-            :title="
-              themeStore.isDark
-                ? t('lp_light_mode', '切换亮色')
-                : t('lp_dark_mode', '切换暗色')
-            "
           />
         </template>
       </NButton>
-
       <NButton
         circle
         class="login-toolbar__btn"
@@ -61,7 +53,6 @@
           <C_Icon
             name="mdi:translate"
             :size="16"
-            :title="langStore.currentLang === 'zh-cn' ? 'English' : '中文'"
           />
         </template>
       </NButton>
@@ -69,38 +60,118 @@
 
     <!-- 登录面板 -->
     <div class="login-wrapper">
+      <!-- 租户编码 + 验证码（C_Login 外部扩展区域） -->
+      <div
+        v-if="!isMicroMode"
+        class="login-extra-fields"
+      >
+        <!-- 错误提示 -->
+        <NAlert
+          v-if="errorMessage"
+          type="error"
+          :show-icon="false"
+          class="login-extra-fields__alert"
+          closable
+          @close="errorMessage = ''"
+        >
+          {{ errorMessage }}
+        </NAlert>
+
+        <!-- 租户编码 -->
+        <div class="login-extra-fields__row">
+          <NInput
+            v-model:value="formValue.tenantCode"
+            size="large"
+            placeholder="请输入租户编码，例如 cim"
+            clearable
+          >
+            <template #prefix>
+              <C_Icon
+                name="mdi:office-building-outline"
+                :size="16"
+              />
+            </template>
+          </NInput>
+          <NButton
+            size="large"
+            secondary
+            :loading="tenantLoading"
+            @click="resolveTenant()"
+          >
+            解析租户
+          </NButton>
+        </div>
+        <div
+          v-if="resolvedTenantLabel"
+          class="login-extra-fields__resolved"
+        >
+          {{ resolvedTenantLabel }}
+        </div>
+
+        <!-- 验证码 -->
+        <div class="login-extra-fields__row">
+          <NInput
+            v-model:value="formValue.code"
+            size="large"
+            placeholder="请输入验证码"
+            clearable
+          >
+            <template #prefix>
+              <C_Icon
+                name="mdi:shield-check-outline"
+                :size="16"
+              />
+            </template>
+          </NInput>
+          <NButton
+            size="large"
+            secondary
+            :loading="captchaLoading"
+            @click="refreshCode"
+          >
+            {{ captchaCode || '获取验证码' }}
+          </NButton>
+        </div>
+      </div>
+
+      <!-- C_Login 组件（原始风格） -->
       <C_Login
         ref="loginRef"
         title="Robot Admin"
-        :subtitle="t('lp_subtitle', '管理系统·请登录您的账号')"
+        subtitle="管理系统 · 请登录您的账号"
+        logo-icon="mdi:robot-outline"
         :features="LOGIN_FEATURES"
         :social-providers="SOCIAL_PROVIDERS"
         :loading="loading"
-        default-username="CHENY"
-        default-password="123456"
         @submit="handleLogin"
         @captcha-submit="handleCaptchaLogin"
         @send-code="handleSendCode"
         @social-login="handleSocialLogin"
         @forgot-password="handleForgotPassword"
-        @register-submit="handleRegisterSubmit"
-        @register-send-code="handleRegisterSendCode"
+        @register="handleRegister"
       />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+  import type { PasswordFormData } from '@robot-admin/naive-ui-components'
   import { initDynamicRouter } from '@/router/dynamicRouter'
-  import { s_userStore } from '@/stores/user/index'
+  import { s_userStore } from '@/stores/user'
   import { s_themeStore } from '@/stores/theme'
   import { s_languageStore } from '@/stores/language'
-  import { loginApi, type LoginResponse } from '@/api/auth'
-  import { useLoginController } from '@/composables/useLoginController'
-  import { LOGIN_FEATURES, SOCIAL_PROVIDERS, createWelcomeConfig } from './data'
+  import {
+    fetchTenantProfile,
+    fetchTenantCode,
+    loginWithTenantContext,
+  } from '@/api/auth'
+  import { isMicroApp } from '@/utils/micro-app-bridge'
+  import { LOGIN_FEATURES, SOCIAL_PROVIDERS } from './data'
   import Spline from './components/Spline.vue'
   import Typewriter from './components/Typewriter.vue'
   import './index.scss'
+
+  defineOptions({ name: 'LoginView' })
 
   const router = useRouter()
   const message = useMessage()
@@ -109,13 +180,31 @@
   const langStore = s_languageStore()
 
   // ===== i18n helper =====
-  const t = (key: string, fallback: string) =>
-    typeof (globalThis as any).$t === 'function'
-      ? (globalThis as any).$t(key, fallback, 'robot_admin')
-      : fallback
+  const t = (key: string, fallback: string) => fallback
 
-  // ===== 打字机 =====
+  // ===== 状态 =====
   const showTypewriter = ref(true)
+  const loading = ref(false)
+  const captchaLoading = ref(false)
+  const tenantLoading = ref(false)
+  const errorMessage = ref('')
+  const captchaCode = ref('')
+  const loginRef = ref<{ resetCaptcha: () => void } | null>(null)
+
+  const isMicroMode = computed(() => isMicroApp())
+
+  // ===== 表单数据（租户 + 验证码，C_Login 自管理账号密码） =====
+  const formValue = reactive({
+    tenantId: userStore.tenant?.id || '',
+    tenantCode: userStore.tenant?.tenentCode || '',
+    code: '',
+  })
+
+  const resolvedTenantLabel = computed(() =>
+    formValue.tenantId
+      ? `已解析租户：${formValue.tenantCode} / ID ${formValue.tenantId}`
+      : ''
+  )
 
   // ===== 工具栏 =====
   const toggleTheme = () =>
@@ -123,51 +212,213 @@
   const toggleLang = () =>
     langStore.setLanguage(langStore.currentLang === 'zh-cn' ? 'en' : 'zh-cn')
 
-  // ===== 登录控制器（业务逻辑全部由 composable 托管） =====
-  const {
-    loginRef,
-    loading,
-    handleLogin,
-    handleCaptchaLogin,
-    handleSendCode,
-    handleSocialLogin,
-    handleForgotPassword,
-    handleRegisterSubmit,
-    handleRegisterSendCode,
-  } = useLoginController<LoginResponse>({
-    loginApi,
-    successMessage: t('lp_login_ok', '登录成功'),
-    errorMessage: t('lp_login_err', '账号或密码错误'),
-    welcomeConfig: createWelcomeConfig(t),
+  // ===== 租户解析 =====
+  /**
+   * * @description: 解析租户信息
+   * ? @param {boolean} showSuccessMessage 是否显示成功提示
+   * ! @return {Promise<boolean>} 是否解析成功
+   */
+  async function resolveTenant(showSuccessMessage = true) {
+    const tenantCode = formValue.tenantCode.trim()
+    if (!tenantCode) {
+      errorMessage.value = '请先输入租户编码'
+      return false
+    }
 
-    onLoginSuccess: async (response, formData) => {
-      userStore.handleLoginSuccess(response.data.token)
-      userStore.setUserInfo(formData)
+    tenantLoading.value = true
+    errorMessage.value = ''
+
+    try {
+      const tenant = await fetchTenantProfile(tenantCode)
+      formValue.tenantId = tenant.id
+      formValue.tenantCode = tenant.tenentCode
+      userStore.setTenantContext(tenant)
+
+      if (showSuccessMessage) {
+        message.success(`租户解析成功：${tenant.tenentCode}`)
+      }
+      return true
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : '租户解析失败'
+      return false
+    } finally {
+      tenantLoading.value = false
+    }
+  }
+
+  /**
+   * * @description: 确保租户已解析
+   * ! @return {Promise<boolean>} 租户是否就绪
+   */
+  async function ensureTenantReady() {
+    if (formValue.tenantId) return true
+    if (!formValue.tenantCode.trim()) {
+      errorMessage.value = '请先输入租户编码'
+      return false
+    }
+    return resolveTenant(false)
+  }
+
+  // ===== 验证码 =====
+  /**
+   * * @description: 获取验证码
+   */
+  async function refreshCode() {
+    errorMessage.value = ''
+    captchaLoading.value = true
+
+    try {
+      const ready = await ensureTenantReady()
+      if (!ready || !formValue.tenantId) {
+        throw new Error('租户解析失败')
+      }
+
+      captchaCode.value = await fetchTenantCode(formValue.tenantId)
+      userStore.setTenantContext({
+        id: formValue.tenantId,
+        tenentCode: formValue.tenantCode,
+      })
+
+      if (!captchaCode.value) {
+        errorMessage.value = '验证码接口返回为空'
+      }
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error
+          ? error.message
+          : '验证码获取失败，请检查后端服务'
+      captchaCode.value = ''
+    } finally {
+      captchaLoading.value = false
+    }
+  }
+
+  // ===== C_Login 事件处理 =====
+  /**
+   * * @description: 密码登录处理
+   * ? @param {PasswordFormData} formData C_Login 提交的表单数据
+   */
+  async function handleLogin(formData: PasswordFormData) {
+    errorMessage.value = ''
+
+    // 独立运行模式需要租户和验证码
+    if (!isMicroMode.value) {
+      const tenantReady = await ensureTenantReady()
+      if (!tenantReady || !formValue.tenantId) {
+        errorMessage.value = errorMessage.value || '租户解析失败'
+        return
+      }
+
+      if (!formValue.code.trim()) {
+        errorMessage.value = '请输入验证码'
+        return
+      }
+    }
+
+    userStore.setTenantContext({
+      id: formValue.tenantId,
+      tenentCode: formValue.tenantCode,
+    })
+
+    loading.value = true
+
+    try {
+      const session = await loginWithTenantContext({
+        username: formData.username,
+        password: formData.password,
+        code: formValue.code,
+        tenant: {
+          id: formValue.tenantId,
+          tenentCode: formValue.tenantCode,
+        },
+      })
+
+      // 应用会话快照
+      userStore.applySession(session)
+
+      // 初始化动态路由
       const ok = await initDynamicRouter()
       if (!ok) throw new Error('动态路由初始化失败')
+
+      message.success('登录成功')
       router.replace('/home')
-    },
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : '登录失败'
+      loginRef.value?.resetCaptcha()
+    } finally {
+      loading.value = false
+    }
+  }
 
-    onError: error => console.error('登录错误:', error),
+  /** 验证码登录（预留） */
+  const handleCaptchaLogin = () => {
+    message.info('验证码登录功能开发中，敬请期待')
+  }
 
-    onCaptchaLogin: () =>
-      message.info(t('lp_captcha_wip', '验证码登录功能开发中，敬请期待')),
+  /** 发送验证码（预留） */
+  const handleSendCode = (account: string) => {
+    message.info(`验证码已发送至 ${account}（演示模式）`)
+  }
 
-    onSendCode: account =>
-      message.info(`${t('lp_code_sent', '验证码已发送至')} ${account}`),
+  /** 社交登录 */
+  const handleSocialLogin = (provider: string) => {
+    message.info(`${provider} 登录开发中，敬请期待`)
+  }
 
-    onSocialLogin: provider =>
-      message.info(`${provider} ${t('lp_login_wip', '登录开发中，敬请期待')}`),
+  /** 忘记密码 */
+  const handleForgotPassword = () => {
+    message.info('忘记密码功能开发中，请联系管理员')
+  }
 
-    onForgotPassword: () =>
-      message.info(t('lp_forgot_wip', '忘记密码功能开发中，请联系管理员')),
-
-    onRegisterSubmit: data => {
-      message.info(t('lp_reg_wip', '注册功能开发中，敬请期待'))
-      console.log('注册信息:', data)
-    },
-
-    onRegisterSendCode: phone =>
-      message.info(`${t('lp_code_sent', '验证码已发送至')} ${phone}`),
-  })
+  /** 注册 */
+  const handleRegister = () => {
+    message.info('注册功能开发中，敬请期待')
+  }
 </script>
+
+<style lang="scss" scoped>
+  /* 租户编码 + 验证码扩展区域 */
+  .login-extra-fields {
+    width: min(460px, 100%);
+    margin-bottom: 16px;
+    padding: 20px 24px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(12px);
+
+    &__alert {
+      margin-bottom: 12px;
+    }
+
+    &__row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      margin-bottom: 10px;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+
+    &__resolved {
+      margin-top: -4px;
+      margin-bottom: 10px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: rgba(15, 99, 223, 0.12);
+      color: #60a5fa;
+      font-size: 12px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .login-extra-fields {
+      &__row {
+        grid-template-columns: 1fr;
+      }
+    }
+  }
+</style>
