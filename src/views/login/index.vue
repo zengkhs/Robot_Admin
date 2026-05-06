@@ -2,10 +2,11 @@
  * @Author: ChenYu ycyplus@gmail.com
  * @Date: 2025-04-29 23:07:28
  * @LastEditors: ChenYu ycyplus@gmail.com
- * @LastEditTime: 2026-04-29
+ * @LastEditTime: 2026-04-30
  * @FilePath: \Robot_Admin\src\views\login\index.vue
- * @Description: 登录页 — 基于 C_Login 组件 + 租户编码/验证码扩展
- *               保留原始 C_Login 风格，移除人机校验
+ * @Description: 登录页 — 保留原始 C_Login 风格
+ *               在面板底部追加租户编码和验证码字段（视觉融入面板）
+ *               移除人机校验（puzzle-captcha）
  *               支持独立运行和微前端嵌入双模式
  * Copyright (c) 2026 by CHENY, All Rights Reserved 😎.
 -->
@@ -30,58 +31,71 @@
 
     <!-- 右上角工具栏：语言 + 主题 -->
     <div class="login-toolbar">
-      <NButton
-        circle
-        class="login-toolbar__btn"
-        @click="toggleTheme"
+      <NTooltip
+        placement="bottom"
+        trigger="hover"
       >
-        <template #icon>
-          <C_Icon
-            :name="
-              themeStore.isDark ? 'mdi:weather-sunny' : 'mdi:weather-night'
-            "
-            :size="16"
-          />
+        <template #trigger>
+          <NButton
+            circle
+            class="login-toolbar__btn"
+            @click="toggleTheme"
+          >
+            <template #icon>
+              <C_Icon
+                :name="
+                  themeStore.isDark ? 'mdi:weather-sunny' : 'mdi:weather-night'
+                "
+                :size="16"
+              />
+            </template>
+          </NButton>
         </template>
-      </NButton>
-      <NButton
-        circle
-        class="login-toolbar__btn"
-        @click="toggleLang"
+        {{ themeStore.isDark ? '切换亮色' : '切换暗色' }}
+      </NTooltip>
+      <NTooltip
+        placement="bottom"
+        trigger="hover"
       >
-        <template #icon>
-          <C_Icon
-            name="mdi:translate"
-            :size="16"
-          />
+        <template #trigger>
+          <NButton
+            circle
+            class="login-toolbar__btn"
+            @click="toggleLang"
+          >
+            <template #icon>
+              <C_Icon
+                name="mdi:translate"
+                :size="16"
+              />
+            </template>
+          </NButton>
         </template>
-      </NButton>
+        {{ langStore.currentLang === 'zh-cn' ? 'English' : '中文' }}
+      </NTooltip>
     </div>
 
     <!-- 登录面板 -->
     <div class="login-wrapper">
-      <!-- 租户编码 + 验证码（C_Login 外部扩展区域） -->
+      <C_Login
+        ref="loginRef"
+        title="Robot Admin"
+        subtitle="管理系统 · 请登录您的账号"
+        logo-icon="mdi:robot-outline"
+        :features="LOGIN_FEATURES"
+        :loading="loading"
+        @submit="handleLogin"
+      />
+
+      <!-- 租户编码 + 验证码（紧贴 C_Login 面板底部，视觉上融为一体） -->
       <div
         v-if="!isMicroMode"
         class="login-extra-fields"
       >
-        <!-- 错误提示 -->
-        <NAlert
-          v-if="errorMessage"
-          type="error"
-          :show-icon="false"
-          class="login-extra-fields__alert"
-          closable
-          @close="errorMessage = ''"
-        >
-          {{ errorMessage }}
-        </NAlert>
-
         <!-- 租户编码 -->
         <div class="login-extra-fields__row">
           <NInput
             v-model:value="formValue.tenantCode"
-            size="large"
             placeholder="请输入租户编码，例如 cim"
             clearable
           >
@@ -93,7 +107,6 @@
             </template>
           </NInput>
           <NButton
-            size="large"
             secondary
             :loading="tenantLoading"
             @click="resolveTenant()"
@@ -112,7 +125,6 @@
         <div class="login-extra-fields__row">
           <NInput
             v-model:value="formValue.code"
-            size="large"
             placeholder="请输入验证码"
             clearable
           >
@@ -124,7 +136,6 @@
             </template>
           </NInput>
           <NButton
-            size="large"
             secondary
             :loading="captchaLoading"
             @click="refreshCode"
@@ -132,24 +143,19 @@
             {{ captchaCode || '获取验证码' }}
           </NButton>
         </div>
-      </div>
 
-      <!-- C_Login 组件（原始风格） -->
-      <C_Login
-        ref="loginRef"
-        title="Robot Admin"
-        subtitle="管理系统 · 请登录您的账号"
-        logo-icon="mdi:robot-outline"
-        :features="LOGIN_FEATURES"
-        :social-providers="SOCIAL_PROVIDERS"
-        :loading="loading"
-        @submit="handleLogin"
-        @captcha-submit="handleCaptchaLogin"
-        @send-code="handleSendCode"
-        @social-login="handleSocialLogin"
-        @forgot-password="handleForgotPassword"
-        @register="handleRegister"
-      />
+        <!-- 错误提示 -->
+        <NAlert
+          v-if="errorMessage"
+          type="error"
+          :show-icon="false"
+          class="login-extra-fields__alert"
+          closable
+          @close="errorMessage = ''"
+        >
+          {{ errorMessage }}
+        </NAlert>
+      </div>
     </div>
   </div>
 </template>
@@ -166,7 +172,7 @@
     loginWithTenantContext,
   } from '@/api/auth'
   import { isMicroApp } from '@/utils/micro-app-bridge'
-  import { LOGIN_FEATURES, SOCIAL_PROVIDERS } from './data'
+  import { LOGIN_FEATURES } from './data'
   import Spline from './components/Spline.vue'
   import Typewriter from './components/Typewriter.vue'
   import './index.scss'
@@ -350,46 +356,22 @@
       loading.value = false
     }
   }
-
-  /** 验证码登录（预留） */
-  const handleCaptchaLogin = () => {
-    message.info('验证码登录功能开发中，敬请期待')
-  }
-
-  /** 发送验证码（预留） */
-  const handleSendCode = (account: string) => {
-    message.info(`验证码已发送至 ${account}（演示模式）`)
-  }
-
-  /** 社交登录 */
-  const handleSocialLogin = (provider: string) => {
-    message.info(`${provider} 登录开发中，敬请期待`)
-  }
-
-  /** 忘记密码 */
-  const handleForgotPassword = () => {
-    message.info('忘记密码功能开发中，请联系管理员')
-  }
-
-  /** 注册 */
-  const handleRegister = () => {
-    message.info('注册功能开发中，敬请期待')
-  }
 </script>
 
 <style lang="scss" scoped>
-  /* 租户编码 + 验证码扩展区域 */
+  /* 租户编码 + 验证码扩展区域 — 紧贴 C_Login 面板底部，视觉融合 */
   .login-extra-fields {
-    width: min(460px, 100%);
-    margin-bottom: 16px;
-    padding: 20px 24px;
-    border-radius: 14px;
+    width: var(--cl-panel-width, 370px);
+    margin-top: -2px;
+    padding: 14px 26px 20px;
+    border-radius: 0 0 var(--cl-panel-radius, 16px) var(--cl-panel-radius, 16px);
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: none;
     backdrop-filter: blur(12px);
 
     &__alert {
-      margin-bottom: 12px;
+      margin-top: 10px;
     }
 
     &__row {
@@ -406,8 +388,8 @@
     &__resolved {
       margin-top: -4px;
       margin-bottom: 10px;
-      padding: 8px 12px;
-      border-radius: 10px;
+      padding: 6px 10px;
+      border-radius: 8px;
       background: rgba(15, 99, 223, 0.12);
       color: #60a5fa;
       font-size: 12px;
@@ -416,6 +398,8 @@
 
   @media (max-width: 640px) {
     .login-extra-fields {
+      width: min(90vw, 370px);
+
       &__row {
         grid-template-columns: 1fr;
       }

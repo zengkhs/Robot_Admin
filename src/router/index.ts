@@ -2,18 +2,16 @@
  * @Author: ChenYu ycyplus@gmail.com
  * @Date: 2025-03-30 17:45:29
  * @LastEditors: ChenYu ycyplus@gmail.com
- * @LastEditTime: 2025-05-06 16:19:04
+ * @LastEditTime: 2026-04-28
  * @FilePath: \Robot_Admin\src\router\index.ts
- * @Description: 路由入口文件
+ * @Description: 路由入口文件 — 支持微前端/独立运行双模式
  * Copyright (c) 2025 by CHENY, All Rights Reserved 😎.
  */
 
-import {
-  createRouter,
-  createWebHistory,
-  createWebHashHistory,
-} from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
+import { isMicroApp, getMicroAppBaseRoute } from '@/utils/micro-app-bridge'
 import routes from './publicRouter'
+import './permission'
 
 /**
  * @description 动态路由参数配置简介
@@ -30,18 +28,22 @@ import routes from './publicRouter'
  * @param meta.keepAlive ==> 是否缓存
  * */
 
-const mode = import.meta.env.VITE_ROUTER_MODE as 'hash' | 'history'
-
-const routerMode = {
-  hash: () => createWebHashHistory(),
-  history: () => createWebHistory(),
+/**
+ * * @description: 获取路由 history 基础路径
+ * 🆕 微前端模式下使用 __MICRO_APP_BASE_ROUTE__ 作为基础路径
+ * 独立运行模式下使用默认 BASE_URL
+ * ! @return {string} 基础路径
+ */
+function getBasePath(): string {
+  if (isMicroApp()) {
+    return getMicroAppBaseRoute() || import.meta.env.BASE_URL
+  }
+  return import.meta.env.BASE_URL
 }
-
-const historyCreator = routerMode[mode] || createWebHashHistory
 
 const router = createRouter({
   routes,
-  history: historyCreator(),
+  history: createWebHistory(getBasePath()),
   strict: false,
   scrollBehavior: () => ({ left: 0, top: 0 }),
 })

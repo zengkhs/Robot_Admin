@@ -2,16 +2,17 @@
  * @Author: ChenYu
  * @Date: 2022-04-06 01:23:50
  * @LastEditors: ChenYu ycyplus@gmail.com
- * @LastEditTime: 2026-03-10
+ * @LastEditTime: 2026-04-29
  * @FilePath: \Robot_Admin\src\constant\index.ts
- * @Description: 常量文件夹
+ * @Description: 常量文件夹 — Token key 与基座 UAM / cim-micro-lite 对齐
  * Copyright (c) ${2022} by ChenYu/天智AgileTeam, All Rights Reserved.
  */
 
-export const TOKEN: string = 'token'
+// * Token 存储 key（与基座 UAM / cim-micro-lite 一致，大写格式）
+export const TOKEN: string = 'ACCESS-TOKEN'
 
-// * refresh token
-export const REFRESH_TOKEN: string = 'refresh_token'
+// * refresh token（与基座一致）
+export const REFRESH_TOKEN: string = 'REFRESH-TOKEN'
 
 // token 时间戳
 export const TIME_STAMP: string = 'timeStamp'
@@ -21,7 +22,10 @@ export const TOKEN_TIMEOUT_VALUE: number = 8 * 3600 * 1000
 
 // * Token 刷新相关
 export const TOKEN_REFRESH_THRESHOLD: number = 5 * 60 * 1000 // 过期前5分钟触发刷新
-export const TOKEN_EXPIRES_IN: string = 'token_expires_in'
+export const TOKEN_EXPIRES_IN: string = 'EXPIRES-AT'
+
+// * 当前用户信息（与基座一致）
+export const CURRENT_USER: string = 'CURRENT-USER'
 
 // * 国际化
 export const LANG: string = 'language'
@@ -52,3 +56,10 @@ export const TABS_WHITE_LIST: string[] = ['/403', '/404', '/500', LOGIN_URL]
 
 // * 高德地图key
 export const MAP_KEY: string = import.meta.env.VITE_MAP_KEY || ''
+
+// * 微前端子应用名称（与 cim-micro-lite VITE_MICRO_APP_NAME 一致）
+export const MICRO_APP_NAME: string = 'cim'
+
+// * Service Route ID（与 cim-micro-lite 一致，请求头 cloudna-service-route-id）
+export const SERVICE_ROUTE_ID: string =
+  import.meta.env.VITE_SERVICE_ROUTE_ID || ''

@@ -2,9 +2,9 @@
  * @Author: ChenYu ycyplus@gmail.com
  * @Date: 2025-03-30 17:45:29
  * @LastEditors: ChenYu ycyplus@gmail.com
- * @LastEditTime: 2026-02-08 01:22:35
+ * @LastEditTime: 2026-04-28
  * @FilePath: \Robot_Admin\src\main.ts
- * @Description: 根入口文件
+ * @Description: 应用入口 — 支持独立运行与微前端嵌入双模式（零基座改造版）
  * Copyright (c) 2025 by CHENY, All Rights Reserved 😎.
  */
 
@@ -23,7 +23,6 @@ import '@robot-admin/theme/styles/glass-morphism.css'
 import '@robot-admin/theme/styles/corporate-minimal.css'
 import '@robot-admin/theme/styles/dark-tech.css'
 import 'virtual:uno.css'
-// vue-flow 样式已移至使用页面按需加载（28-work-flow-editor）
 import '@/router/permission'
 import App from './App.vue'
 import router from './router'
@@ -40,19 +39,61 @@ import {
   setupLayoutSystem, // 🆕 布局系统插件
   setupFileUtils, // 🆕 文件处理工具包
 } from '@/plugins'
-// ✅ 移除 app.use(NaiveUIComponents)，由 RobotNaiveUiResolver 按需解析
 import { setupGlobalErrorHandler } from '@/utils/errorHandler'
+import {
+  isMicroApp,
+  getRunMode,
+  addMicroAppDataListener,
+  removeMicroAppDataListener,
+  getMicroAppData,
+  hasBaseAppData,
+} from '@/utils/micro-app-bridge'
+
+import type { App as VueApp } from 'vue'
+
+let app: VueApp | null = null
 
 /**
- * @description: 应用启动入口
- * @return {*}
+ * * @description: 基座数据监听回调（可选增强 — 基座若下发数据则同步，不下发则忽略）
+ * ? @param {MicroAppData} data 基座下发的数据
+ */
+const dataListenerCallback = async (data: MicroAppData) => {
+  console.log('[CIM] Received data from base app:', data)
+
+  // 动态 import，避免 Vite 不支持 require()
+  const { s_userStore } = await import('@/stores/user')
+  const { s_permissionStore } = await import('@/stores/permission')
+
+  // 基座下发了 token → 同步到子应用（增强，非必需）
+  if (data.token) {
+    const userStore = s_userStore()
+    userStore.setToken(data.token)
+    if (data.refreshToken) userStore.setRefreshToken(data.refreshToken)
+  }
+
+  // 基座下发了用户信息 → 同步
+  if (data.userInfo) {
+    s_userStore().setUserInfo(data.userInfo as any)
+  }
+
+  // 基座下发了菜单数据 → 同步（增强，非必需）
+  if (data.menuList) {
+    s_permissionStore().setAuthMenuListFromBase(data.menuList as any)
+  }
+}
+
+/**
+ * * @description: 应用启动入口（独立运行 & 微前端共用）
+ * ! @return {Promise<void>}
  */
 async function bootstrap() {
+  if (app) return
+
   // 第零阶段：立即显示加载动画（innerHTML 方式，极速）
   setupLoading()
 
   // 第一阶段：创建Vue实例
-  const app = createApp(App)
+  app = createApp(App)
 
   // 关键：全局错误处理必须最先设置，确保捕获所有错误
   setupGlobalErrorHandler(app)
@@ -77,15 +118,53 @@ async function bootstrap() {
   setupFileUtils() // 初始化 file-utils（注入 naive-ui 消息系统）
   setupAnalytics(app)
 
+  // 🆕 微前端环境：注册数据监听（可选增强）
+  if (isMicroApp()) {
+    addMicroAppDataListener(dataListenerCallback)
+
+    // 若基座已下发初始数据，立即同步
+    if (hasBaseAppData()) {
+      const initialData = getMicroAppData()
+      if (initialData) {
+        dataListenerCallback(initialData)
+      }
+    }
+
+    console.log(
+      '[CIM] Running in micro-app mode (base app data:',
+      hasBaseAppData() ? 'available' : 'not available, will self-initialize',
+      ')'
+    )
+  }
+
   // 第三阶段：等待路由就绪
   await router.isReady()
 
   // 第四阶段：挂载应用
   app.mount('#app')
 
-  // 注意：移除加载动画的逻辑已移至 App.vue 的 onMounted 中
-  // 确保首屏内容真正渲染完成后才移除
+  console.log(`[CIM] App mounted in ${getRunMode()} mode`)
 }
 
-// 启动应用
-bootstrap().catch(error => console.error('应用启动失败:', error))
+/** 卸载应用 */
+function unmount() {
+  if (!app) return
+
+  // 🆕 微前端环境：清理数据监听
+  if (isMicroApp()) {
+    removeMicroAppDataListener(dataListenerCallback)
+  }
+
+  app.unmount()
+  app = null
+  console.log('[CIM] App unmounted')
+}
+
+// 独立运行时直接挂载
+if (!isMicroApp()) {
+  bootstrap().catch(error => console.error('应用启动失败:', error))
+}
+
+// 🆕 暴露微前端生命周期
+window.mount = bootstrap
+window.unmount = unmount

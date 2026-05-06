@@ -33,6 +33,15 @@ export default defineConfig(async ({ mode, command }: { mode: string; command: s
   process.env = { ...process.env, ...env }
 
   return {
+    // 🆕 微前端支持：生产环境 base 路径（子应用部署在 /cim/ 下）
+    base: process.env.VITE_MICRO_APP_BASE || '/',
+
+    // 🆕 微前端支持：注入全局常量，供运行时判断微前端环境
+    define: {
+      __MICRO_APP_ENVIRONMENT__: JSON.stringify(false),
+      __MICRO_APP_BASE_ROUTE__: JSON.stringify(''),
+    },
+
     plugins: [
       viteConsolePlugin,
       Unocss(),

@@ -25,6 +25,12 @@ export default {
     allow: ['..'],
   },
 
+  // 🆕 微前端支持：允许跨域，基座通过 fetch 加载子应用
+  cors: true,
+
+  // 🆕 微前端支持：静态资源路径前缀（开发环境必须设置，否则基座加载子应用资源 404）
+  origin: process.env.VITE_MICRO_APP_ORIGIN || 'http://localhost:1988',
+
   // ⚡ 预热高频文件（开发环境优化 - 首次访问更快）
   // 经测试：不影响启动速度（6s → 6s），但能加快首次访问 50-70%
   warmup: {
@@ -40,7 +46,7 @@ export default {
 
   proxy: {
     '^/api': {
-      target: 'https://apifoxmock.com/m1/4902805-4559325-default', //代理接口
+      target: 'http://192.168.28.177:30650', // CIM 后端服务
       changeOrigin: true,
       rewrite: (path: string) => path.replace(/^\/api/, ''),
     },

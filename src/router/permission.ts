@@ -2,9 +2,9 @@
  * @Author: ChenYu ycyplus@gmail.com
  * @Date: 2025-05-11 01:02:12
  * @LastEditors: ChenYu ycyplus@gmail.com
- * @LastEditTime: 2026-03-10
+ * @LastEditTime: 2026-04-28
  * @FilePath: \Robot_Admin\src\router\permission.ts
- * @Description: 路由权限控制 — 认证 + 动态路由 + 路由鉴权
+ * @Description: 路由权限控制 — 零基座依赖，支持微前端/独立运行双模式
  * Copyright (c) 2026 by CHENY, All Rights Reserved 😎.
  */
 import router from '@/router'
@@ -13,6 +13,12 @@ import { initDynamicRouter, type DynamicRoute } from '@/router/dynamicRouter'
 import { s_permissionStore } from '@/stores/permission'
 import { message } from '@/plugins/discrete'
 import { setupNProgress } from '@/plugins/nprogress'
+import {
+  isMicroApp,
+  dispatchToBaseApp,
+  getMicroAppBaseRoute,
+} from '@/utils/micro-app-bridge'
+import { d_isCheckTimeout } from '@/utils/d_auth'
 import type { RouteLocationNormalized } from 'vue-router'
 const nprogress = setupNProgress()
 const WHITE_LIST = ['/login', '/404', '/401']
@@ -73,6 +79,11 @@ const handleDynamicRouterInit = async (fullPath: string): Promise<string> => {
     }
     return fullPath
   } catch (error) {
+    // 🆕 微前端模式：尝试通知基座（尽力而为），但自身也处理
+    if (isMicroApp()) {
+      dispatchToBaseApp({ type: 'routeError', error: String(error) })
+    }
+
     return handleRouteError(error, '动态路由加载失败')
   } finally {
     isInitializing = false
@@ -91,6 +102,7 @@ const shouldInitDynamicRouter = (
 
 /**
  * * @description: 处理未登录场景
+ * 🆕 微前端模式下跳转自身 /login（而非通知基座跳转）
  */
 const handleUnauthenticated = (
   to: RouteLocationNormalized,
@@ -145,17 +157,23 @@ router.beforeEach(
         return true
       }
 
-      // 1. 未登录处理
+      // 1. 未登录处理 — 两种模式统一跳转自身 /login
       if (!token) {
         return handleUnauthenticated(to, meta)
       }
 
-      // 2. 已登录但访问登录页
+      // 🆕 2. Token 超时检查（8小时无操作，与基座一致）
+      if (d_isCheckTimeout()) {
+        await userStore.logout(true) // logout 内部会尝试通知基座
+        return LOGIN_PATH
+      }
+
+      // 3. 已登录但访问登录页
       if (to.path === LOGIN_PATH) {
         return handleLoginPageRedirect()
       }
 
-      // 3. 动态路由初始化
+      // 4. 动态路由初始化
       if (shouldInitDynamicRouter(authMenuList, isInitializing)) {
         const result = await handleDynamicRouterInit(to.fullPath)
 
@@ -166,15 +184,33 @@ router.beforeEach(
         return to.fullPath
       }
 
-      // 4. 路由权限校验（动态路由已初始化后生效）
+      // 5. 路由权限校验（动态路由已初始化后生效）
       if (!checkRoutePermission(to)) {
+        // 🆕 尝试通知基座（尽力而为）
+        if (isMicroApp()) {
+          dispatchToBaseApp({ type: 'noPermission', path: to.path })
+        }
         message.error('您无权访问该页面')
         return '/401'
+      }
+
+      // 🆕 6. 微前端模式：尝试同步路由到基座（尽力而为）
+      if (isMicroApp()) {
+        const basePath = getMicroAppBaseRoute()
+        dispatchToBaseApp({
+          type: 'pathEvent',
+          path: `${basePath}${to.fullPath}`,
+        })
       }
 
       setPageTitle(meta.title)
       return true
     } catch (error) {
+      // 🆕 微前端模式：尝试通知基座（尽力而为）
+      if (isMicroApp()) {
+        dispatchToBaseApp({ type: 'routeError', error: String(error) })
+      }
+
       return handleRouteError(error)
     } finally {
       nprogress.done()

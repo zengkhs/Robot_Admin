@@ -78,7 +78,7 @@
 
 <script setup lang="ts">
   import { s_userStore } from '@/stores/user'
-  import { loginApi, type LoginResponse } from '@/api/auth'
+  import { loginWithTenantContext, type SessionSnapshot } from '@/api/auth'
   import { onReLoginSuccess, onReLoginCancel } from '@robot-admin/request-core'
 
   // Props
@@ -130,15 +130,21 @@
       userStore.setToken('')
 
       try {
-        // 调用登录 API（不需要验证码）
-        const response: LoginResponse = await loginApi({
+        // 使用租户上下文重新登录
+        const { tenant } = userStore
+        if (!tenant?.id || !tenant?.tenentCode) {
+          throw new Error('租户信息缺失，请刷新页面重新登录')
+        }
+
+        const session: SessionSnapshot = await loginWithTenantContext({
           username: formModel.username,
           password: formModel.password,
+          code: '', // 重新登录不需要验证码
+          tenant,
         })
 
-        // 更新 token 并续期
-        const { token } = response.data
-        userStore.handleLoginSuccess(token)
+        // 应用会话快照
+        userStore.applySession(session)
 
         message.success('重新登录成功')
         visible.value = false

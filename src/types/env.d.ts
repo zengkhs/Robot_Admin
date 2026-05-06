@@ -23,7 +23,11 @@ interface ImportMetaEnv {
   readonly VITE_PORT?: string
   readonly VITE_I18N_ENABLED?: string
   readonly VITE_MAP_KEY?: string
-  // 可以根据需要添加更多环境变量
+  // 微前端相关
+  readonly VITE_MICRO_APP_BASE?: string
+  readonly VITE_MICRO_APP_ORIGIN?: string
+  readonly VITE_MICRO_APP_NAME?: string
+  readonly VITE_SERVICE_ROUTE_ID?: string
 }
 
 interface ImportMeta {
